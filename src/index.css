@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+@theme {
+  --color-warm-white: #EFEEEA;
+  --color-ink: #181818;
+  --color-cobalt: #0057D9;
+  --color-powder: #DDE7F6;
+  
+  --font-serif: "Georgia", serif;
+}
+
+@layer utilities {
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.05);
+    border-radius: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.1);
+  }
+}
