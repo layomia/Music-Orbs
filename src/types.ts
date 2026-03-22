@@ -47,6 +47,10 @@ export interface AdaptiveState {
   rejectionCount: Record<string, number>;
   acceptCount: Record<string, number>;
   reverbBias: Record<string, number>; // Positive for more reverb
+  intensityBias: Record<string, number>; // 0.0 to 1.0 multiplier
+  lastAction: 'accept' | 'reject' | 'generate' | null;
+  feedbackMessage: string | null;
+  feedbackTimestamp: number | null;
 }
 
 export const PROPOSAL_SCHEMA = {

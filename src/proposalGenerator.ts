@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { Track, Proposal, PROPOSAL_SCHEMA, GestureFeatures } from "./types";
+import { Track, Proposal, PROPOSAL_SCHEMA, GestureFeatures, AdaptiveState } from "./types";
 
 export function extractGestureFeatures(points: { x: number, y: number, t: number }[]): GestureFeatures {
   if (points.length < 2) return { radius: 0, circularity: 0, speed: 0, steadiness: 0, duration: 0 };
@@ -39,7 +39,8 @@ export function extractGestureFeatures(points: { x: number, y: number, t: number
 export function generateLocalProposals(
   gesture: GestureFeatures,
   text: string,
-  track: Track
+  track: Track,
+  adaptiveState?: AdaptiveState
 ): Proposal[] {
   const isWide = gesture.radius > 50;
   const isFast = gesture.speed > 0.5;
@@ -47,6 +48,8 @@ export function generateLocalProposals(
   const isCircular = gesture.circularity > 0.8;
 
   const intent = text.toLowerCase();
+  const intensityFactor = adaptiveState?.intensityBias[track.id] ?? 1.0;
+  const reverbBias = adaptiveState?.reverbBias[track.id] ?? 0;
 
   // Heuristic mapping
   let baseVol = 0;
@@ -61,6 +64,13 @@ export function generateLocalProposals(
     baseVol += 10;
     baseDelay -= 0.5;
     baseReverb = "dry";
+  }
+
+  // Apply reverb bias from adaptive state
+  if (reverbBias > 0 && baseReverb === "dry") {
+    baseReverb = "room";
+  } else if (reverbBias > 1 && baseReverb === "room") {
+    baseReverb = "hall";
   }
 
   if (isFast || intent.includes("punchier")) {
@@ -78,8 +88,8 @@ export function generateLocalProposals(
       title: "Immediate Interpretation",
       rationale: "Based on your movement, this brings a balanced shift to the track.",
       changes: { 
-        volumeDelta: Math.max(-20, Math.min(20, baseVol)), 
-        delayDelta: Math.max(-1, Math.min(1, baseDelay)), 
+        volumeDelta: Math.max(-20, Math.min(20, baseVol * intensityFactor)), 
+        delayDelta: Math.max(-1, Math.min(1, baseDelay * intensityFactor)), 
         reverbTarget: baseReverb 
       }
     },
@@ -88,8 +98,8 @@ export function generateLocalProposals(
       title: "Subtle Variant",
       rationale: "A gentler version of the detected intent.",
       changes: { 
-        volumeDelta: Math.max(-20, Math.min(20, baseVol * 0.5)), 
-        delayDelta: Math.max(-1, Math.min(1, baseDelay * 0.5)), 
+        volumeDelta: Math.max(-20, Math.min(20, baseVol * 0.5 * intensityFactor)), 
+        delayDelta: Math.max(-1, Math.min(1, baseDelay * 0.5 * intensityFactor)), 
         reverbTarget: baseReverb === "hall" ? "room" : baseReverb 
       }
     },
@@ -98,8 +108,8 @@ export function generateLocalProposals(
       title: "Bold Alternative",
       rationale: "Pushing the expressive qualities further.",
       changes: { 
-        volumeDelta: Math.max(-20, Math.min(20, baseVol * 1.5)), 
-        delayDelta: Math.max(-1, Math.min(1, baseDelay * 1.5)), 
+        volumeDelta: Math.max(-20, Math.min(20, baseVol * 1.5 * intensityFactor)), 
+        delayDelta: Math.max(-1, Math.min(1, baseDelay * 1.5 * intensityFactor)), 
         reverbTarget: baseReverb === "dry" ? "room" : "hall" 
       }
     }
@@ -109,12 +119,13 @@ export function generateLocalProposals(
 export async function generateProposals(
   input: string,
   selectedTrack: Track,
+  adaptiveState: AdaptiveState,
   apiKey?: string
 ): Promise<Proposal[]> {
   // For now, we use dummy gesture features if not provided by a real gesture system
   const dummyGesture: GestureFeatures = { radius: 0, circularity: 0, speed: 0, steadiness: 0, duration: 0 };
-  const local = generateLocalProposals(dummyGesture, input, selectedTrack);
-  return enhanceProposalsWithAI(input, dummyGesture, selectedTrack, local, apiKey);
+  const local = generateLocalProposals(dummyGesture, input, selectedTrack, adaptiveState);
+  return enhanceProposalsWithAI(input, dummyGesture, selectedTrack, local, adaptiveState, apiKey);
 }
 
 export async function enhanceProposalsWithAI(
@@ -122,6 +133,7 @@ export async function enhanceProposalsWithAI(
   gesture: GestureFeatures,
   selectedTrack: Track,
   localProposals: Proposal[],
+  adaptiveState: AdaptiveState,
   apiKey?: string
 ): Promise<Proposal[]> {
   if (!apiKey) return localProposals;
@@ -135,8 +147,13 @@ export async function enhanceProposalsWithAI(
     Current State: Volume ${selectedTrack.volume}, Delay ${selectedTrack.delay}, Reverb ${selectedTrack.reverb}
     User Intent (Text): "${input}"
     User Gesture: Radius ${gesture.radius.toFixed(1)}, Speed ${gesture.speed.toFixed(2)}, Circularity ${gesture.circularity.toFixed(2)}
+    
+    Adaptive System Context:
+    - Current System Intensity: ${Math.round(adaptiveState.intensityBias[selectedTrack.id] * 100)}% (lower means user prefers subtle changes)
+    - Reverb Preference: ${adaptiveState.reverbBias[selectedTrack.id]} (higher means user likes spaciousness)
+    - Last Action: ${adaptiveState.lastAction}
 
-    I have generated 3 local draft proposals. Please refine their titles and rationales to be more evocative and novice-friendly, while keeping the parameter changes similar or slightly improved based on the intent.
+    I have generated 3 local draft proposals. Please refine their titles and rationales to be more evocative and novice-friendly, while keeping the parameter changes similar or slightly improved based on the intent and system context.
     
     Drafts: ${JSON.stringify(localProposals)}
 
