@@ -9,6 +9,7 @@ export interface Track {
   delay: number;  // 0 to 3
   reverb: ReverbType;
   selected: boolean;
+  muted: boolean;
 }
 
 export interface GestureFeatures {
@@ -36,6 +37,7 @@ export interface HistoryItem {
   timestamp: number;
   trackId: string;
   proposalTitle?: string;
+  description?: string;
   previousState: Partial<Track>;
   newState: Partial<Track>;
   type: 'direct' | 'conductor';
@@ -43,6 +45,7 @@ export interface HistoryItem {
 
 export interface AdaptiveState {
   rejectionCount: Record<string, number>;
+  acceptCount: Record<string, number>;
   reverbBias: Record<string, number>; // Positive for more reverb
 }
 

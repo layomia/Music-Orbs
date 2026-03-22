@@ -23,6 +23,11 @@ export class AudioEngine {
   private timerId: any = null;
   private noiseBuffer: AudioBuffer | null = null;
 
+  private startTime: number = 0;
+  private offsetTime: number = 0;
+  private duration: number = 32; // 32 seconds song
+  private isLooping: boolean = true;
+
   private bpm: number = 110;
   private stepDuration: number = 0;
 
@@ -290,6 +295,18 @@ export class AudioEngine {
       });
       this.nextStepTime += this.stepDuration;
       this.currentStep = (this.currentStep + 1) % 16;
+      
+      // Update offsetTime periodically to keep it accurate
+      this.offsetTime = this.context.currentTime - this.startTime;
+      if (this.offsetTime >= this.duration) {
+        if (this.isLooping) {
+          // Auto-loop: shift the start time forward by one duration to create a seamless loop
+          this.startTime += this.duration;
+          this.offsetTime -= this.duration;
+        } else {
+          this.stop();
+        }
+      }
     }
   }
 
@@ -298,6 +315,7 @@ export class AudioEngine {
     if (this.isPlaying) return;
     
     this.isPlaying = true;
+    this.startTime = this.context!.currentTime - this.offsetTime;
     this.nextStepTime = this.context!.currentTime + 0.05;
     this.timerId = setInterval(() => this.scheduler(), this.scheduleInterval);
   }
@@ -308,6 +326,50 @@ export class AudioEngine {
       clearInterval(this.timerId);
       this.timerId = null;
     }
+    if (this.context) {
+      this.offsetTime = this.context.currentTime - this.startTime;
+    }
+  }
+
+  public stop() {
+    this.pause();
+    this.offsetTime = 0;
+    this.currentStep = 0;
+  }
+
+  public seek(time: number) {
+    const wasPlaying = this.isPlaying;
+    if (wasPlaying) this.pause();
+    
+    this.offsetTime = Math.min(this.duration, Math.max(0, time));
+    
+    // Calculate currentStep based on time within the 16-step loop
+    const loopDuration = 16 * this.stepDuration;
+    const timeInLoop = this.offsetTime % loopDuration;
+    this.currentStep = Math.floor(timeInLoop / this.stepDuration);
+    
+    if (wasPlaying) this.play();
+  }
+
+  public getCurrentTime() {
+    if (!this.context) return this.offsetTime % this.duration;
+    if (this.isPlaying) {
+      const time = this.context.currentTime - this.startTime;
+      return time % this.duration;
+    }
+    return this.offsetTime % this.duration;
+  }
+
+  public getDuration() {
+    return this.duration;
+  }
+
+  public isPlayingStatus() {
+    return this.isPlaying;
+  }
+
+  public setLooping(loop: boolean) {
+    this.isLooping = loop;
   }
 }
 
