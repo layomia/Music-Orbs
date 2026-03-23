@@ -42,10 +42,10 @@ export default function App() {
   const [adaptationMessage, setAdaptationMessage] = useState<string | null>(null);
   const [isMessageFaded, setIsMessageFaded] = useState(false);
   const [adaptiveState, setAdaptiveState] = useState<AdaptiveState>({
-    rejectionCount: { drums: 0, piano: 0, guitar: 0, vocals: 0 },
-    acceptCount: { drums: 0, piano: 0, guitar: 0, vocals: 0 },
-    reverbBias: { drums: 0, piano: 0, guitar: 0, vocals: 0 },
-    intensityBias: { drums: 1.0, piano: 1.0, guitar: 1.0, vocals: 1.0 },
+    rejectionCount: 0,
+    acceptCount: 0,
+    reverbBias: 0,
+    intensityBias: 1.0,
     lastAction: null,
     feedbackMessage: null,
     feedbackTimestamp: null
@@ -56,6 +56,7 @@ export default function App() {
   const [duration, setDuration] = useState(audioEngine.getDuration());
   const [currentStep, setCurrentStep] = useState(0);
   const editStartState = useRef<Partial<Track> | null>(null);
+  const accessibilityRef = useRef<HTMLDivElement>(null);
 
   const selectedTrack = tracks.find(t => t.selected);
 
@@ -131,6 +132,25 @@ export default function App() {
     frameId = requestAnimationFrame(update);
     return () => cancelAnimationFrame(frameId);
   }, []);
+
+  // Handle click outside accessibility menu
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (accessibilityRef.current && !accessibilityRef.current.contains(event.target as Node)) {
+        setShowAccessibilityMenu(false);
+      }
+    };
+
+    if (showAccessibilityMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showAccessibilityMenu]);
 
   const togglePreview = (id: string) => {
     const isStarting = previewProposalId !== id;
@@ -282,7 +302,7 @@ export default function App() {
     setPreviewProposalId(null);
     setInputText('');
     
-    const currentAccepts = (adaptiveState.acceptCount[selectedTrack.id] || 0) + 1;
+    const currentAccepts = adaptiveState.acceptCount + 1;
     let message = "Noted. Leaning toward similar changes.";
     
     if (proposal.changes.reverbTarget !== 'dry') {
@@ -295,16 +315,16 @@ export default function App() {
     setAdaptiveState(prev => {
       const newState = {
         ...prev,
-        rejectionCount: { ...prev.rejectionCount, [selectedTrack.id]: 0 },
-        acceptCount: { ...prev.acceptCount, [selectedTrack.id]: currentAccepts },
-        intensityBias: { ...prev.intensityBias, [selectedTrack.id]: Math.min(1.5, prev.intensityBias[selectedTrack.id] + 0.1) },
+        rejectionCount: 0,
+        acceptCount: currentAccepts,
+        intensityBias: Math.min(2.0, prev.intensityBias + 0.2),
         lastAction: 'accept' as const,
         feedbackMessage: message,
         feedbackTimestamp: Date.now()
       };
       
       if (proposal.changes.reverbTarget !== 'dry') {
-        newState.reverbBias = { ...prev.reverbBias, [selectedTrack.id]: prev.reverbBias[selectedTrack.id] + 1 };
+        newState.reverbBias = prev.reverbBias + 2;
       }
       
       return newState;
@@ -355,7 +375,7 @@ export default function App() {
     setPreviewProposalId(null);
     
     if (selectedTrack) {
-      const currentRejections = (adaptiveState.rejectionCount[selectedTrack.id] || 0) + 1;
+      const currentRejections = adaptiveState.rejectionCount + 1;
       let message = "Okay. Exploring different interpretations.";
       
       if (currentRejections >= 2) {
@@ -365,9 +385,9 @@ export default function App() {
       setAdaptationMessage(message);
       setAdaptiveState(prev => ({
         ...prev,
-        rejectionCount: { ...prev.rejectionCount, [selectedTrack.id]: currentRejections },
-        acceptCount: { ...prev.acceptCount, [selectedTrack.id]: 0 },
-        intensityBias: { ...prev.intensityBias, [selectedTrack.id]: Math.max(0.3, prev.intensityBias[selectedTrack.id] - 0.2) },
+        rejectionCount: currentRejections,
+        acceptCount: 0,
+        intensityBias: Math.max(0.1, prev.intensityBias - 0.4),
         lastAction: 'reject' as const,
         feedbackMessage: message,
         feedbackTimestamp: Date.now()
@@ -404,7 +424,7 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-screen flex flex-col transition-colors duration-500 ${isHighContrast ? 'bg-black text-white' : 'bg-warm-white text-ink'}`}>
+    <div className={`h-screen flex flex-col overflow-hidden transition-colors duration-500 ${isHighContrast ? 'bg-black text-white' : 'bg-warm-white text-ink'}`}>
       {/* Top Bar */}
       <header className="h-20 border-b border-black/5 flex items-center justify-between px-8 bg-white/40 backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-6">
@@ -474,7 +494,7 @@ export default function App() {
             <RotateCcw size={22} />
           </button>
 
-          <div className="relative">
+          <div className="relative" ref={accessibilityRef}>
             <button 
               onClick={() => setShowAccessibilityMenu(!showAccessibilityMenu)}
               className={`p-3 rounded-full transition-all ${showAccessibilityMenu || isReducedMotion || isHighContrast || isLargeText ? 'bg-cobalt text-white' : 'bg-black/5 hover:bg-black/10 text-ink/60'}`}
@@ -486,17 +506,12 @@ export default function App() {
 
             <AnimatePresence>
               {showAccessibilityMenu && (
-                <>
-                  <div 
-                    className="fixed inset-0 z-40" 
-                    onClick={() => setShowAccessibilityMenu(false)} 
-                  />
-                  <motion.div
-                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-black/5 p-2 z-50 overflow-hidden"
-                  >
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute right-0 mt-2 w-64 bg-white rounded-2xl shadow-xl border border-black/5 p-2 z-50 overflow-hidden"
+                >
                     <div className="px-4 py-3 border-b border-black/5 mb-1">
                       <span className="text-[10px] font-bold uppercase tracking-widest text-ink/50">Accessibility</span>
                     </div>
@@ -528,7 +543,6 @@ export default function App() {
                       {isLargeText && <Check size={14} />}
                     </button>
                   </motion.div>
-                </>
               )}
             </AnimatePresence>
           </div>
@@ -536,33 +550,6 @@ export default function App() {
       </header>
 
       <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Timeline Bar */}
-        <div className="h-16 border-b border-black/5 bg-white/20 backdrop-blur-md px-8 flex items-center gap-6 z-40">
-          <span className="text-[10px] font-mono font-bold text-ink/60 w-10">{formatTime(currentTime)}</span>
-          <div className="flex-1 relative h-6 flex items-center group">
-            <div className="absolute inset-0 h-1 my-auto bg-black/5 rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-cobalt transition-all duration-100" 
-                style={{ width: `${(currentTime / duration) * 100}%` }}
-              />
-            </div>
-            <input 
-              type="range"
-              min="0"
-              max={duration}
-              step="0.01"
-              value={currentTime}
-              onChange={handleSeek}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-            />
-            <div 
-              className="absolute h-3 w-3 bg-white border-2 border-cobalt rounded-full shadow-md pointer-events-none transition-transform group-hover:scale-125"
-              style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
-            />
-          </div>
-          <span className="text-[10px] font-mono font-bold text-ink/60 w-10 text-right">{formatTime(duration)}</span>
-        </div>
-
         <div className="flex-1 flex overflow-hidden">
           {/* Left Panel: Proposals & History */}
           <aside className="w-[380px] border-r border-black/5 bg-powder/30 flex flex-col overflow-hidden shrink-0">
@@ -607,93 +594,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Adaptation Bias (New) */}
-              {mode === 'ai' && (
-                <div className="p-6 rounded-3xl bg-cobalt/5 border border-cobalt/10 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h2 className={`${isLargeText ? 'text-xs' : 'text-[10px]'} font-bold uppercase tracking-[0.3em] text-cobalt/60`}>AI Adaptation</h2>
-                    <Sparkles size={14} className="text-cobalt/40" />
-                  </div>
-                  <div className="space-y-3">
-                    <AnimatePresence mode="wait">
-                      {adaptationMessage && (
-                        <motion.p 
-                          key={adaptationMessage}
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="text-[10px] text-cobalt font-serif italic border-l-2 border-cobalt/20 pl-3 py-1"
-                        >
-                          "{adaptationMessage}"
-                        </motion.p>
-                      )}
-                    </AnimatePresence>
-                    <div className="flex justify-between items-center">
-                      <span className={`${isLargeText ? 'text-sm' : 'text-xs'} text-ink/60 font-serif italic`}>Current Leaning:</span>
-                      <span className={`${isLargeText ? 'text-sm' : 'text-xs'} font-bold text-cobalt`}>
-                        {(() => {
-                          const biases: string[] = [];
-                          const reverbValues = Object.values(adaptiveState.reverbBias) as number[];
-                          const avgReverb = reverbValues.reduce((a, b) => a + b, 0) / 4;
-                          if (avgReverb > 0.3) biases.push("Spacious");
-                          else if (avgReverb < -0.3) biases.push("Dry");
-                          
-                          const intensityValues = Object.values(adaptiveState.intensityBias) as number[];
-                          const avgIntensity = intensityValues.reduce((a, b) => a + b, 0) / 4;
-                          if (avgIntensity > 1.1) biases.push("Intense");
-                          else if (avgIntensity < 0.9) biases.push("Subtle");
-                          
-                          return biases.length > 0 ? biases.join(" • ") : "Balanced";
-                        })()}
-                      </span>
-                    </div>
-                    <div className="h-1 w-full bg-black/5 rounded-full overflow-hidden">
-                      <motion.div 
-                        animate={{ width: `${Math.min(100, ((Object.values(adaptiveState.acceptCount) as number[]).reduce((a, b) => a + b, 0) / 10) * 100)}%` }}
-                        className="h-full bg-cobalt" 
-                      />
-                    </div>
-                    <p className="text-[9px] text-ink/40 font-bold uppercase tracking-widest text-center">Style Model Confidence</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Proposals Section */}
-              {mode === 'ai' && (
-                <div>
-                  <h2 className={`${isLargeText ? 'text-xs mb-8' : 'text-[10px] mb-6'} font-bold uppercase tracking-[0.3em] text-ink/50`}>AI Interpretations</h2>
-                  <AnimatePresence mode="popLayout">
-                    <div className={`${isLargeText ? 'space-y-8' : 'space-y-6'}`}>
-                      {isGenerating ? (
-                        <div className="flex flex-col items-center justify-center py-12 gap-4">
-                          <Loader2 className="animate-spin text-cobalt/40" size={isLargeText ? 40 : 32} />
-                          <p className={`${isLargeText ? 'text-sm' : 'text-xs'} text-ink/50 font-serif italic`}>Exploring new interpretations...</p>
-                        </div>
-                      ) : proposals.length === 0 ? (
-                        <div className={`${isLargeText ? 'p-12' : 'p-8'} rounded-[2rem] border border-dashed border-black/10 flex flex-col items-center justify-center text-center gap-4`}>
-                          <div className={`${isLargeText ? 'w-16 h-16' : 'w-12 h-12'} rounded-full bg-black/5 flex items-center justify-center text-ink/40`}>
-                            <Sparkles size={isLargeText ? 24 : 20} />
-                          </div>
-                          <p className={`${isLargeText ? 'text-sm' : 'text-xs'} text-ink/50 font-serif italic`}>Describe a mood to see how the AI interprets it.</p>
-                        </div>
-                      ) : (
-                        proposals.map((p) => (
-                          <ProposalCard 
-                            key={p.id} 
-                            proposal={p} 
-                            onAccept={() => handleAcceptProposal(p)}
-                            onReject={() => handleRejectProposal(p.id)}
-                            onPreview={() => togglePreview(p.id)}
-                            isPreviewing={previewProposalId === p.id}
-                            isLargeText={isLargeText}
-                          />
-                        ))
-                      )}
-                    </div>
-                  </AnimatePresence>
-                </div>
-              )}
-
               {/* History Section */}
               <div>
                 <h2 className={`${isLargeText ? 'text-xs mb-8' : 'text-[10px] mb-6'} font-bold uppercase tracking-[0.3em] text-ink/50`}>History</h2>
@@ -720,378 +620,77 @@ export default function App() {
 
           {/* Center Area: Orbs */}
           <div 
-            className="flex-1 relative flex flex-col items-center p-6 overflow-hidden cursor-pointer z-30 bg-warm-white/80 backdrop-blur-md"
+            className="flex-1 relative flex items-center justify-center p-12 overflow-hidden z-30 bg-warm-white/80 backdrop-blur-md"
             onClick={() => handleTrackSelect(null)}
           >
-            {/* Mode Switcher (Moved to Top for Visibility) */}
-            <div className="mb-6 flex items-center bg-black/5 rounded-full p-1 gap-1 shadow-inner shrink-0">
-              <button 
-                onClick={(e) => { e.stopPropagation(); setMode('direct'); }}
-                className={`px-6 py-2.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${mode === 'direct' ? 'bg-white text-ink shadow-md scale-105' : 'text-ink/40 hover:text-ink/60'}`}
-              >
-                Direct Control
-              </button>
-              <button 
-                onClick={(e) => { e.stopPropagation(); setMode('ai'); }}
-                className={`px-6 py-2.5 rounded-full text-[10px] font-bold uppercase tracking-widest transition-all ${mode === 'ai' ? 'bg-white text-ink shadow-md scale-105' : 'text-ink/40 hover:text-ink/60'}`}
-              >
-                AI Collaboration
-              </button>
-            </div>
-
-            <div className="flex-1 flex flex-col items-center justify-center gap-6 w-full overflow-hidden">
-              <div 
-                className={`flex flex-nowrap ${isLargeText ? 'gap-10' : 'gap-6'} items-center justify-center w-full max-w-5xl cursor-default`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                {tracks.map((track) => (
-                  <OrbControl 
-                    key={track.id} 
-                    track={track} 
-                    onSelect={() => handleTrackSelect(track.id)}
-                    onToggleMute={() => handleToggleMute(track.id)}
-                    isReducedMotion={isReducedMotion}
-                    currentStep={currentStep}
-                    isPlaying={isPlaying}
-                    isLargeText={isLargeText}
-                    isHighContrast={isHighContrast}
-                    isSoloMuted={!!previewProposalId && !track.selected}
-                  />
-                ))}
-              </div>
-
-              {/* AI Input Area (Horizontal at Bottom) */}
+            {/* AI Adaptation Panel - Fixed at top */}
+            <div className="absolute top-12 left-0 right-0 flex justify-center pointer-events-none z-40">
               <AnimatePresence>
                 {mode === 'ai' && (
                   <motion.div 
-                    initial={{ y: 50, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: 50, opacity: 0 }}
-                    className="w-full max-w-6xl cursor-default relative"
+                    initial={{ opacity: 0, y: -20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="w-full max-w-md p-6 rounded-[2rem] bg-white/60 backdrop-blur-sm border border-cobalt/10 shadow-xl shadow-cobalt/5 space-y-4 pointer-events-auto"
                     onClick={(e) => e.stopPropagation()}
                   >
-                    {/* Visual Relationship Pointer */}
-                    <AnimatePresence>
-                      {selectedTrack && (
-                        <>
-                          <motion.div 
-                            initial={{ opacity: 0, scale: 0 }}
-                            animate={{ 
-                              opacity: 1, 
-                              scale: 1,
-                              left: selectedTrack.id === 'drums' ? '12.5%' : 
-                                    selectedTrack.id === 'piano' ? '37.5%' : 
-                                    selectedTrack.id === 'guitar' ? '62.5%' : '87.5%'
-                            }}
-                            exit={{ opacity: 0, scale: 0 }}
-                            className={`absolute -top-12 w-24 h-24 -ml-12 blur-3xl rounded-full pointer-events-none transition-colors duration-500 opacity-40 ${
-                              selectedTrack.id === 'drums' ? 'bg-blue-400' : 
-                              selectedTrack.id === 'piano' ? 'bg-amber-400' : 
-                              selectedTrack.id === 'guitar' ? 'bg-emerald-400' : 'bg-pink-400'
-                            }`}
-                          />
-                          <motion.div 
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ 
-                              opacity: 1, 
-                              y: 0,
-                              left: selectedTrack.id === 'drums' ? '12.5%' : 
-                                    selectedTrack.id === 'piano' ? '37.5%' : 
-                                    selectedTrack.id === 'guitar' ? '62.5%' : '87.5%'
-                            }}
-                            exit={{ opacity: 0, y: 10 }}
-                            className="absolute -top-3 -ml-4 z-20 pointer-events-none"
-                          >
-                            <svg width="32" height="16" viewBox="0 0 32 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                              <path d="M16 0L32 16H0L16 0Z" fill="white" />
-                              <path d="M16 0L32 16M16 0L0 16" stroke="rgba(0,0,0,0.05)" strokeWidth="1" />
-                            </svg>
-                          </motion.div>
-                        </>
-                      )}
-                    </AnimatePresence>
-
-                    <div className={`bg-white/80 backdrop-blur-2xl rounded-[2.5rem] border-2 transition-colors duration-500 ${
-                      selectedTrack?.id === 'drums' ? 'border-blue-400/30 shadow-blue-500/10' : 
-                      selectedTrack?.id === 'piano' ? 'border-amber-400/30 shadow-amber-500/10' : 
-                      selectedTrack?.id === 'guitar' ? 'border-emerald-400/30 shadow-emerald-500/10' : 
-                      selectedTrack?.id === 'vocals' ? 'border-pink-400/30 shadow-pink-500/10' : 
-                      'border-black/5 shadow-black/5'
-                    } shadow-2xl ${isLargeText ? 'p-8' : 'p-6'}`}>
-                      <div className="flex flex-col gap-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <h3 className={`font-serif italic ${isLargeText ? 'text-xl' : 'text-lg'} flex items-center gap-2`}>
-                              <Sparkles size={isLargeText ? 20 : 18} className="text-cobalt" />
-                              {selectedTrack ? selectedTrack.label : 'Orbs'}
-                            </h3>
-                            <div className="h-3 w-[1px] bg-black/10" />
-                            <p className="text-[9px] text-ink/50 font-bold uppercase tracking-widest">AI Interpretation</p>
-                          </div>
-                          {selectedTrack && (
-                            <motion.div 
-                              initial={{ opacity: 0, x: 10 }}
-                              animate={{ opacity: 1, x: 0 }}
-                              className="flex items-center gap-2"
-                            >
-                              <span className={`text-[10px] font-bold uppercase tracking-widest ${
-                                selectedTrack.id === 'drums' ? 'text-blue-500' : 
-                                selectedTrack.id === 'piano' ? 'text-amber-600' : 
-                                selectedTrack.id === 'guitar' ? 'text-emerald-500' : 'text-pink-500'
-                              }`}>
-                                Targeting: {selectedTrack.label}
-                              </span>
-                              <button 
-                                onClick={() => handleTrackSelect(null)}
-                                className="p-1 rounded-full hover:bg-black/5 text-ink/40 transition-colors"
-                                title="Clear selection"
-                              >
-                                <VolumeX size={12} />
-                              </button>
-                            </motion.div>
-                          )}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 rounded-2xl bg-cobalt/10 text-cobalt">
+                          <Sparkles size={18} />
                         </div>
-
-                        <div className="relative">
-                          <textarea 
-                            value={inputText}
-                            onChange={(e) => setInputText(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' && !e.shiftKey) {
-                                e.preventDefault();
-                                handleGenerateProposals();
-                              }
-                            }}
-                            placeholder={selectedTrack ? `Describe how you want the ${selectedTrack.label.toLowerCase()} to feel...` : "Describe a feeling or mood for the mix..."}
-                            disabled={isGenerating}
-                            rows={1}
-                            className={`w-full bg-white/50 border border-black/10 rounded-2xl ${isLargeText ? 'py-4 pl-8 pr-32 text-base' : 'py-3 pl-6 pr-28 text-sm'} text-ink focus:outline-none focus:ring-2 focus:ring-cobalt/20 transition-all disabled:opacity-50 resize-none leading-relaxed min-h-[60px]`}
-                          />
-                          <div className={`absolute ${isLargeText ? 'right-4 bottom-3' : 'right-3 bottom-2.5'} flex items-center gap-1.5`}>
-                            {proposals.length > 0 && (
-                              <button 
-                                onClick={() => handleGenerateProposals()}
-                                disabled={isGenerating}
-                                className={`${isLargeText ? 'p-2.5' : 'p-2'} rounded-xl bg-black/5 text-ink/80 hover:bg-black/10 disabled:opacity-30 transition-all shadow-sm flex items-center gap-2`}
-                                aria-label="Explore Alternatives"
-                                title="Explore Alternatives"
-                              >
-                                <RotateCcw size={16} className={isGenerating ? 'animate-spin' : ''} />
-                                <span className="text-[8px] font-bold uppercase tracking-widest">Explore</span>
-                              </button>
-                            )}
-                            <button 
-                              onClick={startListening}
-                              disabled={isGenerating || isListening}
-                              className={`${isLargeText ? 'p-2.5' : 'p-2'} rounded-xl transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-black/5 text-ink/80 hover:bg-black/10'} disabled:opacity-30 shadow-sm`}
-                              aria-label="Voice Input"
-                              title="Voice Input"
-                            >
-                              <Mic size={16} />
-                            </button>
-                            <button 
-                              onClick={() => handleGenerateProposals()}
-                              disabled={isGenerating || !inputText.trim()}
-                              className={`${isLargeText ? 'p-2.5' : 'p-2'} rounded-xl bg-cobalt text-white hover:bg-cobalt/90 disabled:opacity-30 transition-all shadow-sm shadow-cobalt/20`}
-                              aria-label="Generate Proposals"
-                            >
-                              {isGenerating ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <ChevronRight size={16} />}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Adaptation Bias Display */}
-                        <div className="flex items-center justify-between px-4 py-2 bg-black/5 rounded-2xl">
-                          <div className="flex items-center gap-3">
-                            <span className="text-[9px] font-bold uppercase tracking-widest text-ink/30">AI Adaptation Bias:</span>
-                            <div className="flex gap-1.5">
-                              {['Atmospheric', 'Direct', 'Subtle', 'Intense'].map(bias => {
-                                const trackId = selectedTrack?.id || 'drums';
-                                const isAtmospheric = bias === 'Atmospheric' && adaptiveState.reverbBias[trackId] > 0.5;
-                                const isDirect = bias === 'Direct' && adaptiveState.reverbBias[trackId] < -0.5;
-                                const isIntense = bias === 'Intense' && adaptiveState.intensityBias[trackId] > 1.2;
-                                const isSubtle = bias === 'Subtle' && adaptiveState.intensityBias[trackId] < 0.8;
-                                const isActive = isAtmospheric || isDirect || isIntense || isSubtle;
-                                
-                                return (
-                                  <span 
-                                    key={bias}
-                                    className={`px-2.5 py-1 rounded-full text-[8px] font-bold uppercase tracking-tighter transition-all ${isActive ? 'bg-cobalt text-white shadow-sm' : 'text-ink/20'}`}
-                                  >
-                                    {bias}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          </div>
-                          
-                          <AnimatePresence mode="wait">
-                            {adaptationMessage && (
-                              <motion.p 
-                                key={adaptationMessage}
-                                initial={{ opacity: 0, x: 10 }}
-                                animate={{ opacity: isMessageFaded ? 0.4 : 1, x: 0 }}
-                                exit={{ opacity: 0, x: -10 }}
-                                className="text-[9px] text-cobalt font-bold uppercase tracking-wider italic"
-                              >
-                                {adaptationMessage}
-                              </motion.p>
-                            )}
-                          </AnimatePresence>
-                        </div>
-
-                        {/* Hints Area */}
-                        {selectedTrack && (
-                          <div className={`${isLargeText ? 'mt-2 gap-4' : 'mt-1 gap-3'} flex flex-wrap justify-center`}>
-                            {['closer', 'roomier', 'softer', 'wider'].map(hint => (
-                              <button
-                                key={hint}
-                                onClick={() => {
-                                  setInputText(`Make the ${selectedTrack.label.toLowerCase()} feel ${hint}`);
-                                }}
-                                className={`${isLargeText ? 'px-6 py-3 text-[10px]' : 'px-4 py-2 text-[9px]'} rounded-xl bg-black/5 font-bold uppercase tracking-widest text-ink/40 hover:bg-black/10 hover:text-ink/60 transition-all`}
-                              >
-                                {hint}
-                              </button>
-                            ))}
-                          </div>
-                        )}
+                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-cobalt/80">AI Adaptation</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                         <span className="text-[10px] text-ink/40 font-serif italic">System Learning</span>
+                         <div className="w-1.5 h-1.5 rounded-full bg-cobalt animate-pulse" />
                       </div>
                     </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* Direct Editing Area (Horizontal at Bottom) */}
-              <AnimatePresence>
-                {mode === 'direct' && selectedTrack && (
-                  <motion.div 
-                    initial={{ y: 50, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    exit={{ y: 50, opacity: 0 }}
-                    className="w-full max-w-6xl cursor-default relative"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {/* Visual Relationship Pointer (Arrow) */}
-                    <AnimatePresence>
-                      <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ 
-                          opacity: 1, 
-                          y: 0,
-                          left: selectedTrack.id === 'drums' ? '12.5%' : 
-                                selectedTrack.id === 'piano' ? '37.5%' : 
-                                selectedTrack.id === 'guitar' ? '62.5%' : '87.5%'
-                        }}
-                        exit={{ opacity: 0, y: 10 }}
-                        className="absolute -top-4 -ml-3 z-20 pointer-events-none"
-                      >
-                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <path d="M12 24V4M12 4L6 10M12 4L18 10" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </motion.div>
-                    </AnimatePresence>
-
-                    <div className={`bg-white/80 backdrop-blur-2xl rounded-[2.5rem] border-2 transition-colors duration-500 ${
-                      selectedTrack.id === 'drums' ? 'border-blue-400/30 shadow-blue-500/10' : 
-                      selectedTrack.id === 'piano' ? 'border-amber-400/30 shadow-amber-500/10' : 
-                      selectedTrack.id === 'guitar' ? 'border-emerald-400/30 shadow-emerald-500/10' : 
-                      'border-pink-400/30 shadow-pink-500/10'
-                    } shadow-2xl ${isLargeText ? 'p-8' : 'p-6'}`}>
-                      <div className="flex flex-col gap-6">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <h3 className={`font-serif italic ${isLargeText ? 'text-xl' : 'text-lg'} flex items-center gap-2`}>
-                              <Sliders size={isLargeText ? 20 : 18} className="text-cobalt" />
-                              Direct Control: {selectedTrack.label}
-                            </h3>
-                            <div className="h-3 w-[1px] bg-black/10" />
-                            <p className="text-[9px] text-ink/50 font-bold uppercase tracking-widest">Manual Precision</p>
+                    
+                    <div className="space-y-4">
+                      <AnimatePresence mode="wait">
+                        {adaptationMessage && (
+                          <motion.p 
+                            key={adaptationMessage}
+                            initial={{ opacity: 0, x: -5 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            exit={{ opacity: 0, x: 5 }}
+                            className="text-sm text-cobalt font-serif italic border-l-2 border-cobalt/30 pl-4 py-1 leading-relaxed"
+                          >
+                            "{adaptationMessage}"
+                          </motion.p>
+                        )}
+                      </AnimatePresence>
+                      
+                      <div className="flex items-end justify-between gap-8">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex justify-between items-center text-[10px] text-ink/50 font-serif italic mb-1">
+                            <span>Experience Level</span>
+                            <span>{Math.round((adaptiveState.acceptCount / 10) * 100)}%</span>
                           </div>
-                          <div className="flex items-center gap-4">
-                            <button 
-                              onClick={() => updateTrackParam(selectedTrack.id, INITIAL_TRACKS.find(t => t.id === selectedTrack.id)!)}
-                              className={`${isLargeText ? 'text-xs' : 'text-[10px]'} text-ink/60 hover:text-ink/80 font-bold uppercase tracking-[0.2em] transition-colors`}
-                            >
-                              Reset
-                            </button>
-                            <button 
-                              onClick={() => handleTrackSelect(null)}
-                              className="p-2 rounded-full hover:bg-black/5 text-ink/40 transition-colors"
-                            >
-                              <X size={20} />
-                            </button>
+                          <div className="h-1.5 w-full bg-black/5 rounded-full overflow-hidden">
+                            <motion.div 
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.min(100, (adaptiveState.acceptCount / 10) * 100)}%` }}
+                              className="h-full bg-cobalt" 
+                            />
                           </div>
                         </div>
-
-                        <div className="grid grid-cols-3 gap-8 items-center">
-                          <div className="space-y-3">
-                            <div className={`flex justify-between ${isLargeText ? 'text-base' : 'text-xs'} font-bold tracking-tight`}>
-                              <label htmlFor="volume" className="text-ink/70 uppercase tracking-widest text-[9px]">Volume</label>
-                              <span className="text-cobalt">{selectedTrack.volume}%</span>
-                            </div>
-                            <input 
-                              id="volume"
-                              type="range" 
-                              min="0" max="100" 
-                              value={selectedTrack.volume}
-                              onMouseDown={() => {
-                                editStartState.current = { volume: selectedTrack.volume, delay: selectedTrack.delay, reverb: selectedTrack.reverb };
-                              }}
-                              onMouseUp={() => {
-                                if (editStartState.current) {
-                                  commitTrackChange(selectedTrack.id, editStartState.current, { volume: selectedTrack.volume, delay: selectedTrack.delay, reverb: selectedTrack.reverb }, 'direct');
-                                  editStartState.current = null;
-                                }
-                              }}
-                              onChange={(e) => updateTrackParam(selectedTrack.id, { volume: parseInt(e.target.value) })}
-                              className="w-full h-1 bg-black/10 rounded-lg appearance-none cursor-pointer accent-cobalt"
-                            />
-                          </div>
-
-                          <div className="space-y-3">
-                            <div className={`flex justify-between ${isLargeText ? 'text-base' : 'text-xs'} font-bold tracking-tight`}>
-                              <label htmlFor="delay" className="text-ink/70 uppercase tracking-widest text-[9px]">Echo</label>
-                              <span className="text-cobalt">{selectedTrack.delay.toFixed(1)}s</span>
-                            </div>
-                            <input 
-                              id="delay"
-                              type="range" 
-                              min="0" max="3" step="0.1"
-                              value={selectedTrack.delay}
-                              onMouseDown={() => {
-                                editStartState.current = { volume: selectedTrack.volume, delay: selectedTrack.delay, reverb: selectedTrack.reverb };
-                              }}
-                              onMouseUp={() => {
-                                if (editStartState.current) {
-                                  commitTrackChange(selectedTrack.id, editStartState.current, { volume: selectedTrack.volume, delay: selectedTrack.delay, reverb: selectedTrack.reverb }, 'direct');
-                                  editStartState.current = null;
-                                }
-                              }}
-                              onChange={(e) => updateTrackParam(selectedTrack.id, { delay: parseFloat(e.target.value) })}
-                              className="w-full h-1 bg-black/10 rounded-lg appearance-none cursor-pointer accent-cobalt"
-                            />
-                          </div>
-
-                          <div className="space-y-3">
-                            <span className="text-ink/70 uppercase tracking-widest text-[9px] font-bold block">Space</span>
-                            <div className="grid grid-cols-3 gap-2">
-                              {(['dry', 'room', 'hall'] as ReverbType[]).map((r) => (
-                                <button
-                                  key={r}
-                                  onClick={() => {
-                                    const previousState = { volume: selectedTrack.volume, delay: selectedTrack.delay, reverb: selectedTrack.reverb };
-                                    const newState = { reverb: r };
-                                    updateTrackParam(selectedTrack.id, newState);
-                                    commitTrackChange(selectedTrack.id, previousState, { ...previousState, ...newState }, 'direct');
-                                  }}
-                                  className={`py-2 rounded-xl text-[9px] font-bold capitalize transition-all border flex flex-col items-center justify-center ${selectedTrack.reverb === r ? 'bg-cobalt text-white border-cobalt shadow-sm shadow-cobalt/20' : 'bg-white/50 text-ink/70 border-black/5 hover:border-black/10'}`}
-                                >
-                                  {r}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
+                        
+                        <div className="text-right shrink-0">
+                          <span className="text-[10px] text-ink/40 font-serif italic block mb-1">Current Leaning</span>
+                          <span className="text-xs font-bold text-cobalt tracking-tight">
+                            {(() => {
+                              const biases: string[] = [];
+                              const reverb = adaptiveState.reverbBias;
+                              if (reverb > 2) biases.push("Spacious");
+                              else if (reverb < -2) biases.push("Dry");
+                              const intensity = adaptiveState.intensityBias;
+                              if (intensity > 1.2) biases.push("Intense");
+                              else if (intensity < 0.8) biases.push("Subtle");
+                              return biases.length > 0 ? biases.join(" • ") : "Balanced";
+                            })()}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1099,8 +698,274 @@ export default function App() {
                 )}
               </AnimatePresence>
             </div>
+
+            <div className={`relative w-full max-w-6xl aspect-video flex items-center justify-center translate-y-12 ${isLargeText ? 'gap-32' : 'gap-20'}`}>
+              {tracks.map((track) => (
+                <OrbControl 
+                  key={track.id} 
+                  track={track} 
+                  onSelect={() => handleTrackSelect(track.id)}
+                  onToggleMute={() => handleToggleMute(track.id)}
+                  isReducedMotion={isReducedMotion}
+                  currentStep={currentStep}
+                  isPlaying={isPlaying}
+                  isLargeText={isLargeText}
+                  isHighContrast={isHighContrast}
+                  isSoloMuted={!!previewProposalId && !track.selected}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+
+          {/* Right Panel: Active Workspace (AI & Direct Controls) */}
+          <AnimatePresence>
+            {(mode === 'ai' || mode === 'direct') && (
+              <motion.aside 
+                initial={{ x: 380, opacity: 0 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: 380, opacity: 0 }}
+                transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                className="w-[380px] border-l border-black/5 bg-powder/30 flex flex-col overflow-hidden shrink-0"
+              >
+                <div className={`flex-1 overflow-y-auto ${isLargeText ? 'p-8 space-y-12' : 'p-6 space-y-8'} custom-scrollbar`}>
+                  
+                  {/* Mode Switcher inside Sidebar */}
+                  <div className="flex bg-black/5 p-1 rounded-2xl">
+                    <button 
+                      onClick={() => setMode('direct')}
+                      className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${mode === 'direct' ? 'bg-white text-cobalt shadow-sm' : 'text-ink/40 hover:text-ink/60'}`}
+                    >
+                      Direct
+                    </button>
+                    <button 
+                      onClick={() => setMode('ai')}
+                      className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-widest transition-all ${mode === 'ai' ? 'bg-white text-cobalt shadow-sm' : 'text-ink/40 hover:text-ink/60'}`}
+                    >
+                      AI
+                    </button>
+                  </div>
+
+                  <AnimatePresence mode="wait">
+                    {mode === 'ai' ? (
+                      <motion.div 
+                        key="ai-panel"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className="space-y-8"
+                      >
+                        {/* AI Prompt Section */}
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Sparkles size={16} className="text-cobalt" />
+                              <h3 className="text-[10px] font-bold uppercase tracking-widest text-ink/60">
+                                AI Interpretation {selectedTrack && <span className="text-cobalt ml-1">— {selectedTrack.label}</span>}
+                              </h3>
+                            </div>
+                            {selectedTrack && (
+                              <button 
+                                onClick={() => handleTrackSelect(null)}
+                                className="p-1 rounded-full hover:bg-black/5 text-ink/40"
+                              >
+                                <X size={14} />
+                              </button>
+                            )}
+                          </div>
+
+                          <div className="relative">
+                            <textarea 
+                              value={inputText}
+                              onChange={(e) => setInputText(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  handleGenerateProposals();
+                                }
+                              }}
+                              placeholder={selectedTrack ? `Describe how you want the ${selectedTrack.label.toLowerCase()} to feel...` : "Describe a mood for the mix..."}
+                              disabled={isGenerating}
+                              rows={3}
+                              className="w-full bg-white/50 border border-black/10 rounded-2xl p-4 text-sm text-ink focus:outline-none focus:ring-2 focus:ring-cobalt/20 transition-all disabled:opacity-50 resize-none leading-relaxed"
+                            />
+                            <div className="absolute right-3 bottom-3 flex items-center gap-1.5">
+                              <button 
+                                onClick={startListening}
+                                disabled={isGenerating || isListening}
+                                className={`p-2 rounded-xl transition-all ${isListening ? 'bg-red-500 text-white animate-pulse' : 'bg-black/5 text-ink/80 hover:bg-black/10'} disabled:opacity-30 shadow-sm`}
+                              >
+                                <Mic size={16} />
+                              </button>
+                              <button 
+                                onClick={() => handleGenerateProposals()}
+                                disabled={isGenerating || !inputText.trim()}
+                                className="p-2 rounded-xl bg-cobalt text-white hover:bg-cobalt/90 disabled:opacity-30 transition-all shadow-sm shadow-cobalt/20"
+                              >
+                                {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ChevronRight size={16} />}
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Hints */}
+                          {selectedTrack && (
+                            <div className="flex flex-wrap gap-2">
+                              {['closer', 'roomier', 'softer', 'wider'].map(hint => (
+                                <button
+                                  key={hint}
+                                  onClick={() => setInputText(`Make it feel ${hint}`)}
+                                  className="px-3 py-1.5 rounded-lg bg-black/5 text-[9px] font-bold uppercase tracking-widest text-ink/40 hover:bg-black/10 hover:text-ink/60 transition-all"
+                                >
+                                  {hint}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Proposals List */}
+                        <div className="space-y-6">
+                          <div className="flex items-center justify-between">
+                            <h2 className="text-[10px] font-bold uppercase tracking-[0.3em] text-ink/50">Interpretations</h2>
+                            {proposals.length > 0 && (
+                              <button onClick={() => handleGenerateProposals()} disabled={isGenerating} className="text-cobalt hover:text-cobalt/80 transition-colors">
+                                <RotateCcw size={14} className={isGenerating ? 'animate-spin' : ''} />
+                              </button>
+                            )}
+                          </div>
+                          <div className="space-y-4">
+                            {isGenerating ? (
+                              <div className="flex flex-col items-center justify-center py-8 gap-3">
+                                <Loader2 className="animate-spin text-cobalt/40" size={24} />
+                                <p className="text-[10px] text-ink/40 font-serif italic">Exploring interpretations...</p>
+                              </div>
+                            ) : proposals.length === 0 ? (
+                              <div className="p-8 rounded-3xl border border-dashed border-black/10 flex flex-col items-center justify-center text-center gap-3">
+                                <Sparkles size={20} className="text-ink/20" />
+                                <p className="text-[10px] text-ink/40 font-serif italic">Describe a mood to see interpretations.</p>
+                              </div>
+                            ) : (
+                              proposals.map((p) => (
+                                <ProposalCard 
+                                  key={p.id} 
+                                  proposal={p} 
+                                  onAccept={() => handleAcceptProposal(p)}
+                                  onReject={() => handleRejectProposal(p.id)}
+                                  onPreview={() => togglePreview(p.id)}
+                                  isPreviewing={previewProposalId === p.id}
+                                  isLargeText={isLargeText}
+                                />
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      <motion.div 
+                        key="direct-panel"
+                        initial={{ opacity: 0, y: 20 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -20 }}
+                        className="space-y-8"
+                      >
+                        {selectedTrack ? (
+                          <>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Sliders size={16} className="text-cobalt" />
+                                <h3 className="text-[10px] font-bold uppercase tracking-widest text-ink/60">Direct Control: {selectedTrack.label}</h3>
+                              </div>
+                              <button 
+                                onClick={() => updateTrackParam(selectedTrack.id, INITIAL_TRACKS.find(t => t.id === selectedTrack.id)!)}
+                                className="text-[9px] text-ink/40 hover:text-ink/60 font-bold uppercase tracking-widest"
+                              >
+                                Reset
+                              </button>
+                            </div>
+
+                            <div className="space-y-8">
+                              <div className="space-y-3">
+                                <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-ink/60">
+                                  <span>Volume</span>
+                                  <span className="text-cobalt">{selectedTrack.volume}%</span>
+                                </div>
+                                <input 
+                                  type="range" min="0" max="100" 
+                                  value={selectedTrack.volume}
+                                  onChange={(e) => updateTrackParam(selectedTrack.id, { volume: parseInt(e.target.value) })}
+                                  className="w-full h-1.5 bg-black/5 rounded-full appearance-none cursor-pointer accent-cobalt"
+                                />
+                              </div>
+
+                              <div className="space-y-3">
+                                <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-ink/60">
+                                  <span>Echo</span>
+                                  <span className="text-cobalt">{selectedTrack.delay.toFixed(1)}s</span>
+                                </div>
+                                <input 
+                                  type="range" min="0" max="3" step="0.1"
+                                  value={selectedTrack.delay}
+                                  onChange={(e) => updateTrackParam(selectedTrack.id, { delay: parseFloat(e.target.value) })}
+                                  className="w-full h-1.5 bg-black/5 rounded-full appearance-none cursor-pointer accent-cobalt"
+                                />
+                              </div>
+
+                              <div className="space-y-3">
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-ink/60 block">Space</span>
+                                <div className="grid grid-cols-3 gap-2">
+                                  {(['dry', 'room', 'hall'] as ReverbType[]).map((r) => (
+                                    <button
+                                      key={r}
+                                      onClick={() => updateTrackParam(selectedTrack.id, { reverb: r })}
+                                      className={`py-3 rounded-xl text-[10px] font-bold capitalize transition-all border ${selectedTrack.reverb === r ? 'bg-cobalt text-white border-cobalt shadow-lg shadow-cobalt/20' : 'bg-white/50 text-ink/60 border-black/5 hover:border-black/10'}`}
+                                    >
+                                      {r}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="p-8 rounded-3xl border border-dashed border-black/10 flex flex-col items-center justify-center text-center gap-3">
+                            <Sliders size={20} className="text-ink/20" />
+                            <p className="text-[10px] text-ink/40 font-serif italic">Select an orb to adjust its parameters directly.</p>
+                          </div>
+                        )}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </motion.aside>
+            )}
+          </AnimatePresence>
+          </div>
+
+          {/* Timeline Bar at Bottom */}
+          <div className="h-16 border-t border-black/5 bg-white/95 backdrop-blur-md px-8 flex items-center gap-6 z-40 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
+            <span className="text-[10px] font-mono font-bold text-ink/60 w-10">{formatTime(currentTime)}</span>
+            <div className="flex-1 relative h-6 flex items-center group">
+              <div className="absolute inset-0 h-1 my-auto bg-black/5 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-cobalt transition-all duration-100" 
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                />
+              </div>
+              <input 
+                type="range"
+                min="0"
+                max={duration}
+                step="0.01"
+                value={currentTime}
+                onChange={handleSeek}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+              />
+              <div 
+                className="absolute h-3 w-3 bg-white border-2 border-cobalt rounded-full shadow-md pointer-events-none transition-transform group-hover:scale-125"
+                style={{ left: `calc(${(currentTime / duration) * 100}% - 6px)` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono font-bold text-ink/60 w-10 text-right">{formatTime(duration)}</span>
+          </div>
       </main>
 
       <AnimatePresence>

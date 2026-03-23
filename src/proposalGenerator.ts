@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { Track, Proposal, PROPOSAL_SCHEMA, GestureFeatures, AdaptiveState } from "./types";
 
 export function extractGestureFeatures(points: { x: number, y: number, t: number }[]): GestureFeatures {
@@ -48,8 +48,8 @@ export function generateLocalProposals(
   const isCircular = gesture.circularity > 0.8;
 
   const intent = text.toLowerCase();
-  const intensityFactor = adaptiveState?.intensityBias[track.id] ?? 1.0;
-  const reverbBias = adaptiveState?.reverbBias[track.id] ?? 0;
+  const intensityFactor = adaptiveState?.intensityBias ?? 1.0;
+  const reverbBias = adaptiveState?.reverbBias ?? 0;
 
   // Heuristic mapping
   let baseVol = 0;
@@ -57,28 +57,28 @@ export function generateLocalProposals(
   let baseReverb: "dry" | "room" | "hall" = track.reverb;
 
   if (isWide || intent.includes("roomy") || intent.includes("wider")) {
-    baseVol -= 5;
-    baseDelay += 0.5;
+    baseVol -= 5 * intensityFactor;
+    baseDelay += 0.5 * intensityFactor;
     baseReverb = "hall";
   } else if (intent.includes("closer") || (gesture.radius < 20 && isSteady)) {
-    baseVol += 10;
-    baseDelay -= 0.5;
+    baseVol += 10 * intensityFactor;
+    baseDelay -= 0.5 * intensityFactor;
     baseReverb = "dry";
   }
 
   // Apply reverb bias from adaptive state
   if (reverbBias > 0 && baseReverb === "dry") {
     baseReverb = "room";
-  } else if (reverbBias > 1 && baseReverb === "room") {
+  } else if (reverbBias > 2 && baseReverb === "room") {
     baseReverb = "hall";
   }
 
   if (isFast || intent.includes("punchier")) {
-    baseVol += 15;
+    baseVol += 15 * intensityFactor;
   }
 
   if (!isSteady || intent.includes("atmospheric")) {
-    baseDelay += 1;
+    baseDelay += 1 * intensityFactor;
     baseReverb = "hall";
   }
 
@@ -88,8 +88,8 @@ export function generateLocalProposals(
       title: "Immediate Interpretation",
       rationale: "Based on your movement, this brings a balanced shift to the track.",
       changes: { 
-        volumeDelta: Math.max(-20, Math.min(20, baseVol * intensityFactor)), 
-        delayDelta: Math.max(-1, Math.min(1, baseDelay * intensityFactor)), 
+        volumeDelta: Math.max(-30, Math.min(30, baseVol)), 
+        delayDelta: Math.max(-2, Math.min(2, baseDelay)), 
         reverbTarget: baseReverb 
       }
     },
@@ -98,8 +98,8 @@ export function generateLocalProposals(
       title: "Subtle Variant",
       rationale: "A gentler version of the detected intent.",
       changes: { 
-        volumeDelta: Math.max(-20, Math.min(20, baseVol * 0.5 * intensityFactor)), 
-        delayDelta: Math.max(-1, Math.min(1, baseDelay * 0.5 * intensityFactor)), 
+        volumeDelta: Math.max(-30, Math.min(30, baseVol * 0.4)), 
+        delayDelta: Math.max(-2, Math.min(2, baseDelay * 0.4)), 
         reverbTarget: baseReverb === "hall" ? "room" : baseReverb 
       }
     },
@@ -108,8 +108,8 @@ export function generateLocalProposals(
       title: "Bold Alternative",
       rationale: "Pushing the expressive qualities further.",
       changes: { 
-        volumeDelta: Math.max(-20, Math.min(20, baseVol * 1.5 * intensityFactor)), 
-        delayDelta: Math.max(-1, Math.min(1, baseDelay * 1.5 * intensityFactor)), 
+        volumeDelta: Math.max(-30, Math.min(30, baseVol * 1.8)), 
+        delayDelta: Math.max(-2, Math.min(2, baseDelay * 1.8)), 
         reverbTarget: baseReverb === "dry" ? "room" : "hall" 
       }
     }
@@ -148,16 +148,25 @@ export async function enhanceProposalsWithAI(
     User Intent (Text): "${input}"
     User Gesture: Radius ${gesture.radius.toFixed(1)}, Speed ${gesture.speed.toFixed(2)}, Circularity ${gesture.circularity.toFixed(2)}
     
-    Adaptive System Context:
-    - Current System Intensity: ${Math.round(adaptiveState.intensityBias[selectedTrack.id] * 100)}% (lower means user prefers subtle changes)
-    - Reverb Preference: ${adaptiveState.reverbBias[selectedTrack.id]} (higher means user likes spaciousness)
+    Adaptive System Context (CRITICAL):
+    - Current System Intensity (Bias): ${Math.round(adaptiveState.intensityBias * 100)}%
+      * If > 100%, the user prefers BOLDER, more aggressive changes. Scale deltas UP.
+      * If < 100%, the user prefers SUBTLE, more delicate changes. Scale deltas DOWN.
+    - Reverb Preference: ${adaptiveState.reverbBias} 
+      * Higher values mean the user loves spaciousness (room/hall).
     - Last Action: ${adaptiveState.lastAction}
+    - Rejection Count: ${adaptiveState.rejectionCount}
+    - Accept Count: ${adaptiveState.acceptCount}
 
-    I have generated 3 local draft proposals. Please refine their titles and rationales to be more evocative and novice-friendly, while keeping the parameter changes similar or slightly improved based on the intent and system context.
+    I have generated 3 local draft proposals. Please refine their titles and rationales to be more evocative and novice-friendly.
     
+    IMPORTANT: You MUST adjust the numerical changes (volumeDelta, delayDelta, reverbTarget) to reflect the Adaptive System Context. 
+    If the user has rejected many proposals recently, be significantly more conservative. 
+    If they have accepted many, be more adventurous.
+
     Drafts: ${JSON.stringify(localProposals)}
 
-    Return exactly 3 proposals in JSON format.
+    CRITICAL: You MUST return exactly 3 proposals in the JSON array.
   `;
 
   try {
@@ -166,7 +175,8 @@ export async function enhanceProposalsWithAI(
       contents: [{ parts: [{ text: prompt }] }],
       config: {
         responseMimeType: "application/json",
-        responseSchema: PROPOSAL_SCHEMA
+        responseSchema: PROPOSAL_SCHEMA,
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW }
       }
     });
 
@@ -175,14 +185,21 @@ export async function enhanceProposalsWithAI(
       throw new Error("Empty response from AI");
     }
 
-    const enhanced = JSON.parse(text);
+    let enhanced = JSON.parse(text);
     if (!Array.isArray(enhanced)) {
       throw new Error("AI did not return an array of proposals");
     }
 
-    return enhanced.map((p: any) => ({ 
+    // Ensure we have exactly 3 by padding with local ones if necessary
+    if (enhanced.length < 3) {
+      enhanced = [...enhanced, ...localProposals.slice(enhanced.length, 3)];
+    } else if (enhanced.length > 3) {
+      enhanced = enhanced.slice(0, 3);
+    }
+
+    return enhanced.map((p: any, idx: number) => ({ 
       ...p, 
-      id: p.id || `ai-${Math.random().toString(36).substr(2, 9)}`,
+      id: p.id || `ai-${idx}-${Math.random().toString(36).substr(2, 9)}`,
       isEnhanced: true 
     }));
   } catch (error) {
